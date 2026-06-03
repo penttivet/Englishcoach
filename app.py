@@ -392,7 +392,7 @@ async function processAudio() {
       lastAudioUrl = data.audio_url;
       await playAudio(data.audio_url);
       setProc(4, 'done');
-      document.getElementById('replayBtn').style.display = 'block';
+      document.getElementById('playBtn').style.display = 'block';
     } else {
       document.getElementById('proc4').style.display = 'none';
     }
@@ -469,7 +469,7 @@ function nextTurn() {
   document.getElementById('nextBtn').style.display = 'none';
   document.getElementById('aiBubble').classList.remove('visible');
   document.getElementById('feedbackCard').classList.remove('visible');
-  document.getElementById('replayBtn').style.display = 'none';
+  document.getElementById('playBtn').style.display = 'none';
 }
 
 function resetAll() {
@@ -486,7 +486,7 @@ function resetAll() {
   document.getElementById('nextBtn').style.display = 'none';
   document.getElementById('resetBtn').style.display = 'none';
   document.getElementById('timer').classList.remove('visible');
-  document.getElementById('replayBtn').style.display = 'none';
+  document.getElementById('playBtn').style.display = 'none';
   hideError();
 }
 
