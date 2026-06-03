@@ -6,7 +6,7 @@ import secrets
 import hashlib
 from datetime import datetime
 from functools import wraps
-from flask import Flask, request, jsonify, send_file, render_template_string, session, redirect
+from flask import Flask, request, jsonify, send_file, render_template_string, session, redirect, Response
 import requests
 
 app = Flask(__name__)
@@ -14,11 +14,12 @@ app.secret_key = os.environ.get("SECRET_KEY", secrets.token_hex(32))
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger(__name__)
 
-ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
-OPENAI_API_KEY    = os.environ.get("OPENAI_API_KEY", "")
-UPSTASH_URL       = os.environ.get("UPSTASH_REDIS_REST_URL", "")
-UPSTASH_TOKEN     = os.environ.get("UPSTASH_REDIS_REST_TOKEN", "")
-ADMIN_EMAIL       = os.environ.get("ADMIN_EMAIL", "penttivet@gmail.com")
+ANTHROPIC_API_KEY  = os.environ.get("ANTHROPIC_API_KEY", "")
+OPENAI_API_KEY     = os.environ.get("OPENAI_API_KEY", "")
+UPSTASH_URL        = os.environ.get("UPSTASH_REDIS_REST_URL", "")
+UPSTASH_TOKEN      = os.environ.get("UPSTASH_REDIS_REST_TOKEN", "")
+ELEVENLABS_API_KEY = os.environ.get("ELEVENLABS_API_KEY", "")
+ELEVENLABS_VOICE_ID = os.environ.get("ELEVENLABS_VOICE_ID", "21m00Tcm4TlvDq8ikWAM")  # Rachel - selkeä englanti
 
 REDIS_HEADERS = {
     "Authorization": f"Bearer {UPSTASH_TOKEN}",
@@ -43,13 +44,6 @@ def redis_set(key, value, ttl=None):
         requests.post(UPSTASH_URL, headers=REDIS_HEADERS, json=cmd, timeout=5)
     except Exception as e:
         log.error(f"Redis set error: {e}")
-
-def redis_keys(pattern):
-    try:
-        r = requests.post(UPSTASH_URL, headers=REDIS_HEADERS, json=["KEYS", pattern], timeout=5)
-        return r.json().get("result", [])
-    except:
-        return []
 
 def hash_password(password):
     return hashlib.sha256(password.encode()).hexdigest()
@@ -127,17 +121,11 @@ MAIN_HTML = """<!DOCTYPE html>
   }
   * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
   body { font-family:'DM Sans',sans-serif; background:var(--bg); color:var(--text); min-height:100vh; display:flex; flex-direction:column; align-items:center; }
-  
-  /* Header */
   .header { width:100%; padding:18px 20px; display:flex; align-items:center; gap:12px; border-bottom:1px solid var(--border); background:rgba(10,10,15,0.9); backdrop-filter:blur(12px); position:sticky; top:0; z-index:100; }
   .logo { font-family:'Syne',sans-serif; font-weight:800; font-size:20px; background:linear-gradient(135deg,var(--accent),var(--accent2)); -webkit-background-clip:text; -webkit-text-fill-color:transparent; }
   .tagline { font-size:12px; color:var(--text2); }
   .nav-link { margin-left:auto; font-size:13px; color:var(--text2); text-decoration:none; padding:6px 12px; border-radius:8px; border:1px solid var(--border); }
-
-  /* Container */
   .container { width:100%; max-width:500px; padding:20px 16px; flex:1; display:flex; flex-direction:column; gap:16px; }
-
-  /* Scenario picker */
   .section-title { font-family:'Syne',sans-serif; font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:2px; color:var(--text2); margin-bottom:12px; }
   .scenarios { display:grid; grid-template-columns:repeat(2,1fr); gap:10px; }
   .scenario-card { background:var(--surface); border:1px solid var(--border); border-radius:14px; padding:14px; cursor:pointer; transition:all 0.2s; display:flex; flex-direction:column; gap:6px; }
@@ -146,10 +134,8 @@ MAIN_HTML = """<!DOCTYPE html>
   .scenario-emoji { font-size:24px; }
   .scenario-title { font-family:'Syne',sans-serif; font-size:13px; font-weight:600; }
   .scenario-desc { font-size:11px; color:var(--text2); line-height:1.4; }
-
-  /* Recording */
   .record-card { background:var(--surface); border:1px solid var(--border); border-radius:20px; padding:24px; display:flex; flex-direction:column; align-items:center; gap:16px; }
-  .record-btn { width:96px; height:96px; border-radius:50%; border:none; cursor:pointer; display:flex; align-items:center; justify-content:center; font-size:36px; transition:all 0.2s; position:relative; background:linear-gradient(135deg,var(--accent),var(--accent2)); box-shadow:0 8px 32px rgba(0,229,160,0.3); }
+  .record-btn { width:96px; height:96px; border-radius:50%; border:none; cursor:pointer; display:flex; align-items:center; justify-content:center; font-size:36px; transition:all 0.2s; background:linear-gradient(135deg,var(--accent),var(--accent2)); box-shadow:0 8px 32px rgba(0,229,160,0.3); }
   .record-btn.recording { background:linear-gradient(135deg,var(--warn),#ff3366); box-shadow:0 8px 32px rgba(255,107,53,0.4); animation:pulse 1.5s infinite; }
   .record-btn:disabled { opacity:0.4; cursor:not-allowed; }
   @keyframes pulse { 0%,100%{transform:scale(1);}50%{transform:scale(1.05);} }
@@ -165,12 +151,20 @@ MAIN_HTML = """<!DOCTYPE html>
   .wave span:nth-child(5){animation-delay:0.4s;height:18px;}
   @keyframes wave{0%,100%{transform:scaleY(0.4);}50%{transform:scaleY(1);}}
 
-  /* AI Response */
+  /* Speaking animation */
+  .speaking-indicator { display:none; align-items:center; gap:8px; font-size:13px; color:var(--accent2); }
+  .speaking-indicator.visible { display:flex; }
+  .speak-wave { display:flex; gap:3px; align-items:flex-end; height:20px; }
+  .speak-wave span { width:3px; background:var(--accent2); border-radius:2px; animation:wave 0.6s ease-in-out infinite; }
+  .speak-wave span:nth-child(2){animation-delay:0.1s;}
+  .speak-wave span:nth-child(3){animation-delay:0.2s;}
+
   .ai-bubble { background:var(--surface2); border-radius:16px; padding:16px; font-size:14px; line-height:1.6; border-left:3px solid var(--accent2); display:none; }
   .ai-bubble.visible { display:block; }
-  .ai-label { font-size:10px; font-weight:600; text-transform:uppercase; letter-spacing:1.5px; color:var(--accent2); margin-bottom:8px; }
+  .ai-label { font-size:10px; font-weight:600; text-transform:uppercase; letter-spacing:1.5px; color:var(--accent2); margin-bottom:8px; display:flex; align-items:center; justify-content:space-between; }
+  .replay-btn { background:rgba(0,184,255,0.1); border:1px solid rgba(0,184,255,0.2); color:var(--accent2); padding:4px 10px; border-radius:20px; font-size:11px; cursor:pointer; font-family:'DM Sans',sans-serif; }
+  .replay-btn:hover { background:rgba(0,184,255,0.2); }
 
-  /* Feedback */
   .feedback-card { background:var(--surface); border:1px solid var(--border); border-radius:16px; padding:16px; display:none; flex-direction:column; gap:12px; }
   .feedback-card.visible { display:flex; }
   .score-row { display:flex; align-items:center; gap:12px; }
@@ -183,26 +177,18 @@ MAIN_HTML = """<!DOCTYPE html>
   .corrected-label { font-size:10px; color:var(--accent); font-weight:600; text-transform:uppercase; letter-spacing:1px; margin-bottom:6px; }
   .errors-list { display:flex; flex-direction:column; gap:6px; }
   .error-item { background:rgba(255,107,53,0.08); border-radius:8px; padding:8px 12px; font-size:12px; color:var(--warn); border:1px solid rgba(255,107,53,0.2); }
-
-  /* Chat history */
   .chat-history { display:flex; flex-direction:column; gap:10px; }
   .msg-user { background:linear-gradient(135deg,rgba(0,229,160,0.12),rgba(0,184,255,0.08)); border-radius:14px 14px 4px 14px; padding:12px 14px; font-size:14px; align-self:flex-end; max-width:85%; border:1px solid rgba(0,229,160,0.2); }
   .msg-ai { background:var(--surface2); border-radius:14px 14px 14px 4px; padding:12px 14px; font-size:14px; align-self:flex-start; max-width:85%; }
   .msg-label { font-size:10px; font-weight:600; text-transform:uppercase; letter-spacing:1px; margin-bottom:4px; }
   .msg-label.you { color:var(--accent); }
   .msg-label.ai { color:var(--accent2); }
-
-  /* Error */
   .error-msg { background:rgba(255,107,53,0.1); border:1px solid rgba(255,107,53,0.3); border-radius:10px; padding:12px; font-size:13px; color:var(--warn); display:none; }
   .error-msg.visible { display:block; }
-
-  /* Buttons */
   .btn { width:100%; padding:14px; border-radius:12px; border:none; font-family:'Syne',sans-serif; font-size:14px; font-weight:700; cursor:pointer; transition:all 0.2s; letter-spacing:0.5px; }
   .btn-primary { background:linear-gradient(135deg,var(--accent),var(--accent2)); color:#0a0a0f; }
   .btn-secondary { background:var(--surface2); color:var(--text); border:1px solid var(--border); }
   .btn:disabled { opacity:0.4; cursor:not-allowed; }
-
-  /* Processing */
   .processing { display:none; flex-direction:column; gap:8px; }
   .processing.visible { display:flex; }
   .proc-step { display:flex; align-items:center; gap:10px; font-size:13px; color:var(--text2); padding:8px 0; }
@@ -222,13 +208,11 @@ MAIN_HTML = """<!DOCTYPE html>
 </div>
 
 <div class="container">
-  <!-- Scenario Selection -->
   <div id="scenarioSection">
     <div class="section-title">Choose a scenario</div>
     <div class="scenarios" id="scenarioGrid"></div>
   </div>
 
-  <!-- Recording -->
   <div class="record-card">
     <div class="timer" id="timer">00:00</div>
     <button class="record-btn" id="recordBtn" onclick="toggleRecording()" disabled>🎙️</button>
@@ -236,23 +220,27 @@ MAIN_HTML = """<!DOCTYPE html>
     <div class="record-hint" id="recordHint">Select a scenario to start</div>
   </div>
 
-  <!-- Error -->
   <div class="error-msg" id="errorMsg"></div>
 
-  <!-- Processing -->
   <div class="processing" id="processing">
     <div class="proc-step" id="proc1"><div class="spinner"></div><span>Listening to your speech...</span></div>
     <div class="proc-step" id="proc2"><div class="spinner" style="opacity:0.3"></div><span>AI is responding...</span></div>
     <div class="proc-step" id="proc3"><div class="spinner" style="opacity:0.3"></div><span>Analyzing your English...</span></div>
+    <div class="proc-step" id="proc4"><div class="spinner" style="opacity:0.3"></div><span>Preparing voice response...</span></div>
   </div>
 
-  <!-- AI Response -->
   <div class="ai-bubble" id="aiBubble">
-    <div class="ai-label">🤖 Coach says</div>
+    <div class="ai-label">
+      🤖 Coach says
+      <button class="replay-btn" onclick="replayAudio()" id="replayBtn" style="display:none">🔊 Replay</button>
+    </div>
     <div id="aiText"></div>
+    <div class="speaking-indicator" id="speakingIndicator" style="margin-top:8px;">
+      <div class="speak-wave"><span></span><span></span><span></span></div>
+      <span>Speaking...</span>
+    </div>
   </div>
 
-  <!-- Feedback -->
   <div class="feedback-card" id="feedbackCard">
     <div class="section-title">Your English feedback</div>
     <div class="score-row">
@@ -266,10 +254,8 @@ MAIN_HTML = """<!DOCTYPE html>
     <div class="errors-list" id="errorsList"></div>
   </div>
 
-  <!-- Chat History -->
   <div class="chat-history" id="chatHistory"></div>
 
-  <!-- New turn button -->
   <button class="btn btn-secondary" id="nextBtn" onclick="nextTurn()" style="display:none">🎙️ Speak again</button>
   <button class="btn btn-secondary" onclick="resetAll()" style="margin-top:4px;display:none" id="resetBtn">🔄 New scenario</button>
 </div>
@@ -278,23 +264,23 @@ MAIN_HTML = """<!DOCTYPE html>
 let mediaRecorder=null, audioChunks=[], isRecording=false;
 let timerInterval=null, seconds=0;
 let selectedScenario=null, conversationHistory=[], audioBlob=null;
+let currentAudio=null, lastAudioUrl=null;
 
 const scenarios = {{ scenarios|tojson }};
 
-// Build scenario grid
 const grid = document.getElementById('scenarioGrid');
 scenarios.forEach(s => {
   const card = document.createElement('div');
   card.className = 'scenario-card';
   card.innerHTML = `<div class="scenario-emoji">${s.emoji}</div><div class="scenario-title">${s.title}</div><div class="scenario-desc">${s.desc}</div>`;
-  card.onclick = () => selectScenario(s);
+  card.onclick = () => selectScenario(s, card);
   grid.appendChild(card);
 });
 
-function selectScenario(s) {
+function selectScenario(s, card) {
   selectedScenario = s;
   document.querySelectorAll('.scenario-card').forEach(c => c.classList.remove('selected'));
-  event.currentTarget.classList.add('selected');
+  card.classList.add('selected');
   document.getElementById('recordBtn').disabled = false;
   document.getElementById('recordHint').textContent = `Tap to speak — ${s.title}`;
   conversationHistory = [];
@@ -367,13 +353,11 @@ async function processAudio() {
     setProc(1, 'done');
     setProc(2, 'active');
 
-    // Show AI response
     document.getElementById('aiText').textContent = data.ai_response;
     document.getElementById('aiBubble').classList.add('visible');
     setProc(2, 'done');
     setProc(3, 'active');
 
-    // Show feedback
     const fb = data.feedback;
     const score = fb.score || 0;
     const circle = document.getElementById('scoreCircle');
@@ -402,7 +386,17 @@ async function processAudio() {
     document.getElementById('feedbackCard').classList.add('visible');
     setProc(3, 'done');
 
-    // Add to chat history
+    // Play voice if available
+    if (data.audio_url) {
+      setProc(4, 'active');
+      lastAudioUrl = data.audio_url;
+      await playAudio(data.audio_url);
+      setProc(4, 'done');
+      document.getElementById('replayBtn').style.display = 'block';
+    } else {
+      document.getElementById('proc4').style.display = 'none';
+    }
+
     addChatMessage('you', data.transcript);
     addChatMessage('ai', data.ai_response);
     conversationHistory = data.updated_history;
@@ -421,16 +415,40 @@ async function processAudio() {
   }
 }
 
+async function playAudio(url) {
+  return new Promise((resolve) => {
+    if (currentAudio) { currentAudio.pause(); currentAudio = null; }
+    const audio = new Audio(url);
+    currentAudio = audio;
+    document.getElementById('speakingIndicator').classList.add('visible');
+    audio.onended = () => {
+      document.getElementById('speakingIndicator').classList.remove('visible');
+      currentAudio = null;
+      resolve();
+    };
+    audio.onerror = () => {
+      document.getElementById('speakingIndicator').classList.remove('visible');
+      resolve();
+    };
+    audio.play().catch(resolve);
+  });
+}
+
+function replayAudio() {
+  if (lastAudioUrl) playAudio(lastAudioUrl);
+}
+
 function setProc(num, status) {
   const el = document.getElementById('proc'+num);
+  if (!el) return;
   el.classList.remove('active','done');
-  const spinner = el.querySelector('.spinner') || el.querySelector('div');
+  const spinner = el.querySelector('.spinner');
   if (status === 'active') {
     el.classList.add('active');
     if (spinner) spinner.style.opacity = '1';
   } else if (status === 'done') {
     el.classList.add('done');
-    if (spinner) { spinner.style.display = 'none'; }
+    if (spinner) spinner.style.display = 'none';
     el.innerHTML = '✅ ' + el.textContent.trim();
   }
 }
@@ -451,11 +469,13 @@ function nextTurn() {
   document.getElementById('nextBtn').style.display = 'none';
   document.getElementById('aiBubble').classList.remove('visible');
   document.getElementById('feedbackCard').classList.remove('visible');
+  document.getElementById('replayBtn').style.display = 'none';
 }
 
 function resetAll() {
   selectedScenario = null;
   conversationHistory = [];
+  lastAudioUrl = null;
   document.querySelectorAll('.scenario-card').forEach(c => c.classList.remove('selected'));
   document.getElementById('recordBtn').disabled = true;
   document.getElementById('recordBtn').textContent = '🎙️';
@@ -466,6 +486,7 @@ function resetAll() {
   document.getElementById('nextBtn').style.display = 'none';
   document.getElementById('resetBtn').style.display = 'none';
   document.getElementById('timer').classList.remove('visible');
+  document.getElementById('replayBtn').style.display = 'none';
   hideError();
 }
 
@@ -639,12 +660,58 @@ def speak():
         log.error(f"Feedback error: {e}")
         feedback = {"corrected": transcript, "feedback": "Good effort! Keep practicing.", "errors": [], "score": 70}
 
+    # Step 4: Text-to-speech with ElevenLabs
+    audio_url = None
+    if ELEVENLABS_API_KEY:
+        try:
+            tts_resp = requests.post(
+                f"https://api.elevenlabs.io/v1/text-to-speech/{ELEVENLABS_VOICE_ID}",
+                headers={
+                    "xi-api-key": ELEVENLABS_API_KEY,
+                    "Content-Type": "application/json"
+                },
+                json={
+                    "text": ai_response,
+                    "model_id": "eleven_turbo_v2",
+                    "voice_settings": {
+                        "stability": 0.5,
+                        "similarity_boost": 0.75,
+                        "speed": 0.9
+                    }
+                },
+                timeout=15
+            )
+            if tts_resp.ok:
+                # Tallenna audio väliaikaisesti Redisiin base64-muodossa
+                import base64
+                audio_b64 = base64.b64encode(tts_resp.content).decode()
+                audio_key = f"ec:audio:{session.get('user_email','anon')}:latest"
+                redis_set(audio_key, audio_b64, ttl=300)  # 5 min TTL
+                audio_url = "/audio/latest"
+                log.info("ElevenLabs TTS success")
+            else:
+                log.error(f"ElevenLabs error: {tts_resp.status_code} {tts_resp.text[:200]}")
+        except Exception as e:
+            log.error(f"TTS error: {e}")
+
     return jsonify({
         "transcript": transcript,
         "ai_response": ai_response,
         "feedback": feedback,
-        "updated_history": history[-10:]  # keep last 10 messages
+        "audio_url": audio_url,
+        "updated_history": history[-10:]
     })
+
+@app.route("/audio/latest")
+@login_required
+def serve_audio():
+    import base64
+    audio_key = f"ec:audio:{session.get('user_email','anon')}:latest"
+    audio_b64 = redis_get(audio_key)
+    if not audio_b64:
+        return "", 404
+    audio_data = base64.b64decode(audio_b64)
+    return Response(audio_data, mimetype="audio/mpeg")
 
 @app.route("/health")
 def health():
