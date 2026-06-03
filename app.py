@@ -676,7 +676,7 @@ def speak():
                     "voice_settings": {
                         "stability": 0.5,
                         "similarity_boost": 0.75,
-                        "speed": 0.9
+                        "speed": 0.75
                     }
                 },
                 timeout=15
