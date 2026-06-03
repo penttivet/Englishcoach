@@ -230,11 +230,11 @@ MAIN_HTML = """<!DOCTYPE html>
   </div>
 
   <div class="ai-bubble" id="aiBubble">
-    <div class="ai-label">
-      🤖 Coach says
-      <button class="replay-btn" onclick="replayAudio()" id="replayBtn" style="display:none">🔊 Replay</button>
-    </div>
+    <div class="ai-label">🤖 Coach says</div>
     <div id="aiText"></div>
+    <button id="playBtn" onclick="replayAudio()" style="display:none;width:100%;margin-top:14px;padding:14px;border-radius:12px;border:none;background:linear-gradient(135deg,#00b8ff,#00e5a0);color:#0a0a0f;font-size:15px;font-weight:700;cursor:pointer;letter-spacing:0.5px;">
+      🔊 Tap to hear Coach speak
+    </button>
     <div class="speaking-indicator" id="speakingIndicator" style="margin-top:8px;">
       <div class="speak-wave"><span></span><span></span><span></span></div>
       <span>Speaking...</span>
