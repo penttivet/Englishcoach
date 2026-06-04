@@ -242,7 +242,7 @@ MAIN_HTML = """<!DOCTYPE html>
     <div class="ai-label">🤖 Coach says</div>
     <div id="aiText"></div>
     <button id="playBtn" onclick="replayAudio()" style="display:none;width:100%;margin-top:14px;padding:16px;border-radius:12px;border:none;background:linear-gradient(135deg,#00b8ff,#00e5a0);color:#0a0a0f;font-size:16px;font-weight:700;cursor:pointer;letter-spacing:0.5px;animation:glow 1.5s ease-in-out infinite;">
-      🔊 Kuuntele vastaus
+      🔊 Tap to hear Coach speak
     </button>
     <div class="speaking-indicator" id="speakingIndicator" style="margin-top:8px;">
       <div class="speak-wave"><span></span><span></span><span></span></div>
