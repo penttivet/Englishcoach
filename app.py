@@ -20,6 +20,7 @@ UPSTASH_URL        = os.environ.get("UPSTASH_REDIS_REST_URL", "")
 UPSTASH_TOKEN      = os.environ.get("UPSTASH_REDIS_REST_TOKEN", "")
 ELEVENLABS_API_KEY = os.environ.get("ELEVENLABS_API_KEY", "")
 ELEVENLABS_VOICE_ID = os.environ.get("ELEVENLABS_VOICE_ID", "21m00Tcm4TlvDq8ikWAM")  # Rachel - selkeä englanti
+ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "speakup2026")
 
 REDIS_HEADERS = {
     "Authorization": f"Bearer {UPSTASH_TOKEN}",
@@ -44,6 +45,13 @@ def redis_set(key, value, ttl=None):
         requests.post(UPSTASH_URL, headers=REDIS_HEADERS, json=cmd, timeout=5)
     except Exception as e:
         log.error(f"Redis set error: {e}")
+
+def redis_keys(pattern):
+    try:
+        r = requests.post(UPSTASH_URL, headers=REDIS_HEADERS, json=["KEYS", pattern], timeout=5)
+        return r.json().get("result", [])
+    except:
+        return []
 
 def hash_password(password):
     return hashlib.sha256(password.encode()).hexdigest()
@@ -196,6 +204,7 @@ MAIN_HTML = """<!DOCTYPE html>
   .proc-step.done { color:var(--accent); }
   .spinner { width:16px; height:16px; border:2px solid rgba(255,255,255,0.1); border-top-color:var(--accent); border-radius:50%; animation:spin 0.8s linear infinite; flex-shrink:0; }
   @keyframes spin { to{transform:rotate(360deg);} }
+  @keyframes glow { 0%,100%{box-shadow:0 4px 20px rgba(0,184,255,0.4);}50%{box-shadow:0 4px 32px rgba(0,229,160,0.7);} }
 </style>
 </head>
 <body>
@@ -232,8 +241,8 @@ MAIN_HTML = """<!DOCTYPE html>
   <div class="ai-bubble" id="aiBubble">
     <div class="ai-label">🤖 Coach says</div>
     <div id="aiText"></div>
-    <button id="playBtn" onclick="replayAudio()" style="display:none;width:100%;margin-top:14px;padding:14px;border-radius:12px;border:none;background:linear-gradient(135deg,#00b8ff,#00e5a0);color:#0a0a0f;font-size:15px;font-weight:700;cursor:pointer;letter-spacing:0.5px;">
-      🔊 Tap to hear Coach speak
+    <button id="playBtn" onclick="replayAudio()" style="display:none;width:100%;margin-top:14px;padding:16px;border-radius:12px;border:none;background:linear-gradient(135deg,#00b8ff,#00e5a0);color:#0a0a0f;font-size:16px;font-weight:700;cursor:pointer;letter-spacing:0.5px;animation:glow 1.5s ease-in-out infinite;">
+      🔊 Kuuntele vastaus
     </button>
     <div class="speaking-indicator" id="speakingIndicator" style="margin-top:8px;">
       <div class="speak-wave"><span></span><span></span><span></span></div>
@@ -392,7 +401,9 @@ async function processAudio() {
       lastAudioUrl = data.audio_url;
       await playAudio(data.audio_url);
       setProc(4, 'done');
-      document.getElementById('playBtn').style.display = 'block';
+      const pb = document.getElementById('playBtn');
+      pb.style.display = 'block';
+      setTimeout(() => pb.scrollIntoView({behavior:'smooth', block:'center'}), 100);
     } else {
       document.getElementById('proc4').style.display = 'none';
     }
@@ -495,6 +506,126 @@ function hideError() { document.getElementById('errorMsg').classList.remove('vis
 </script>
 </body>
 </html>"""
+
+
+ADMIN_HTML = """<!DOCTYPE html>
+<html lang="fi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SpeakUp Admin</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Syne:wght@600;700;800&family=DM+Sans:wght@300;400;500&display=swap');
+  :root { --bg:#0a0a0f; --surface:#13131a; --surface2:#1c1c28; --accent:#00e5a0; --accent2:#00b8ff; --text:#f0f0f8; --text2:#7070a0; --border:rgba(255,255,255,0.06); }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { font-family:'DM Sans',sans-serif; background:var(--bg); color:var(--text); padding:24px; }
+  .header { display:flex; align-items:center; justify-content:space-between; margin-bottom:24px; flex-wrap:wrap; gap:12px; }
+  h1 { font-family:'Syne',sans-serif; font-size:22px; background:linear-gradient(135deg,var(--accent),var(--accent2)); -webkit-background-clip:text; -webkit-text-fill-color:transparent; }
+  .stats { display:flex; gap:12px; flex-wrap:wrap; margin-bottom:24px; }
+  .stat { background:var(--surface); border-radius:12px; padding:14px 20px; border:1px solid var(--border); }
+  .stat-num { font-family:'Syne',sans-serif; font-size:28px; font-weight:700; color:var(--accent); }
+  .stat-label { font-size:12px; color:var(--text2); margin-top:2px; }
+  .search { background:var(--surface2); border:1px solid var(--border); border-radius:10px; padding:10px 16px; color:var(--text); font-size:14px; width:100%; max-width:320px; outline:none; margin-bottom:16px; }
+  .search:focus { border-color:var(--accent); }
+  table { width:100%; border-collapse:collapse; background:var(--surface); border-radius:16px; overflow:hidden; border:1px solid var(--border); }
+  th { background:var(--surface2); padding:12px 16px; text-align:left; font-size:11px; text-transform:uppercase; letter-spacing:1px; color:var(--text2); font-weight:600; }
+  td { padding:14px 16px; border-bottom:1px solid var(--border); font-size:14px; }
+  tr:last-child td { border-bottom:none; }
+  tr:hover td { background:rgba(0,229,160,0.03); }
+  .logout { padding:8px 16px; background:var(--surface2); border:1px solid var(--border); border-radius:8px; color:var(--text); text-decoration:none; font-size:13px; }
+  .empty { text-align:center; padding:48px; color:var(--text2); }
+  .date { font-size:12px; color:var(--text2); }
+</style>
+</head>
+<body>
+<div class="header">
+  <h1>🎙️ SpeakUp Admin</h1>
+  <a href="/admin/logout" class="logout">Kirjaudu ulos</a>
+</div>
+
+<div class="stats">
+  <div class="stat">
+    <div class="stat-num">{{ total }}</div>
+    <div class="stat-label">Käyttäjää yhteensä</div>
+  </div>
+  <div class="stat">
+    <div class="stat-num">{{ today }}</div>
+    <div class="stat-label">Tänään rekisteröityi</div>
+  </div>
+</div>
+
+<input class="search" type="text" id="search" placeholder="🔍 Hae nimellä tai sähköpostilla..." oninput="filterTable()">
+
+<table id="userTable">
+  <thead>
+    <tr>
+      <th>Nimi</th>
+      <th>Sähköposti</th>
+      <th>Rekisteröityi</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for u in users %}
+    <tr>
+      <td><strong>{{ u.name or '—' }}</strong></td>
+      <td>{{ u.email }}</td>
+      <td class="date">{{ u.created[:10] if u.created else '—' }}</td>
+    </tr>
+    {% endfor %}
+    {% if not users %}
+    <tr><td colspan="3" class="empty">Ei käyttäjiä vielä.</td></tr>
+    {% endif %}
+  </tbody>
+</table>
+
+<script>
+function filterTable() {
+  const q = document.getElementById('search').value.toLowerCase();
+  document.querySelectorAll('#userTable tbody tr').forEach(row => {
+    row.style.display = row.textContent.toLowerCase().includes(q) ? '' : 'none';
+  });
+}
+</script>
+</body>
+</html>"""
+
+ADMIN_LOGIN_HTML = """<!DOCTYPE html>
+<html lang="fi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SpeakUp Admin</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Syne:wght@700;800&family=DM+Sans:wght@400;500&display=swap');
+  :root { --bg:#0a0a0f; --surface:#13131a; --surface2:#1c1c28; --accent:#00e5a0; --accent2:#00b8ff; --text:#f0f0f8; --text2:#7070a0; --border:rgba(255,255,255,0.06); --danger:#ff6b35; }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { font-family:'DM Sans',sans-serif; background:var(--bg); color:var(--text); min-height:100vh; display:flex; align-items:center; justify-content:center; padding:24px; }
+  .logo { font-family:'Syne',sans-serif; font-weight:800; font-size:28px; background:linear-gradient(135deg,var(--accent),var(--accent2)); -webkit-background-clip:text; -webkit-text-fill-color:transparent; text-align:center; margin-bottom:32px; }
+  .card { background:var(--surface); border-radius:20px; padding:28px; width:100%; max-width:360px; border:1px solid var(--border); }
+  .card h2 { font-family:'Syne',sans-serif; font-size:18px; margin-bottom:20px; }
+  .field { margin-bottom:14px; }
+  label { font-size:11px; color:var(--text2); text-transform:uppercase; letter-spacing:1px; display:block; margin-bottom:6px; }
+  input { background:var(--surface2); border:1px solid var(--border); border-radius:10px; padding:13px 16px; color:var(--text); font-size:15px; width:100%; outline:none; }
+  input:focus { border-color:var(--accent); }
+  button { width:100%; padding:14px; border-radius:12px; border:none; font-family:'Syne',sans-serif; font-size:15px; font-weight:700; cursor:pointer; background:linear-gradient(135deg,var(--accent),var(--accent2)); color:#0a0a0f; margin-top:8px; }
+  .error { background:rgba(255,107,53,0.1); border:1px solid rgba(255,107,53,0.3); border-radius:8px; padding:10px 14px; font-size:13px; color:var(--danger); margin-bottom:16px; }
+</style>
+</head>
+<body>
+<div style="width:100%;max-width:360px">
+  <div class="logo">SpeakUp Admin</div>
+  <div class="card">
+    <h2>Kirjaudu sisään</h2>
+    {% if error %}<div class="error">{{ error }}</div>{% endif %}
+    <form method="POST">
+      <div class="field"><label>Salasana</label><input type="password" name="password" autofocus></div>
+      <button type="submit">Kirjaudu</button>
+    </form>
+  </div>
+</div>
+</body>
+</html>"""
+
 
 AUTH_HTML = """<!DOCTYPE html>
 <html lang="en">
@@ -712,6 +843,33 @@ def serve_audio():
         return "", 404
     audio_data = base64.b64decode(audio_b64)
     return Response(audio_data, mimetype="audio/mpeg")
+
+@app.route("/admin", methods=["GET", "POST"])
+def admin():
+    if request.method == "POST":
+        if request.form.get("password") == ADMIN_PASSWORD:
+            session["admin"] = True
+            return redirect("/admin")
+        return render_template_string(ADMIN_LOGIN_HTML, error="Väärä salasana")
+    if not session.get("admin"):
+        return render_template_string(ADMIN_LOGIN_HTML, error=None)
+    keys = redis_keys("ec:user:*")
+    users = []
+    today = datetime.now().strftime("%Y-%m-%d")
+    today_count = 0
+    for key in keys:
+        user = redis_get(key)
+        if user:
+            users.append(user)
+            if user.get("created", "").startswith(today):
+                today_count += 1
+    users.sort(key=lambda x: x.get("created", ""), reverse=True)
+    return render_template_string(ADMIN_HTML, users=users, total=len(users), today=today_count)
+
+@app.route("/admin/logout")
+def admin_logout():
+    session.pop("admin", None)
+    return redirect("/admin")
 
 @app.route("/health")
 def health():
